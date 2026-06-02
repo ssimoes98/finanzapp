@@ -153,6 +153,12 @@
   .typeseg button.on[data-t=income]{color:var(--green)}
   .typeseg button.on[data-t=investment]{color:var(--invest)}
   .typeseg button.on[data-t=all]{color:var(--text)}
+  .typeseg.locked{opacity:.5;pointer-events:none}
+  .fix-row{display:flex;align-items:center;justify-content:space-between;gap:12px;cursor:pointer;
+    background:var(--surface-2);border:1px solid var(--border);border-radius:13px;padding:11px 14px;margin-bottom:14px}
+  .fix-row .fl b{font-size:14px;font-weight:700;display:block}
+  .fix-row .fl small{font-size:12px;color:var(--muted);font-weight:600}
+  .fixbadge{font-size:11px;margin-left:2px}
   nav{position:fixed;bottom:0;left:0;right:0;z-index:40;
     background:var(--surface);border-top:1px solid var(--border);
     padding:8px 4px calc(8px + env(safe-area-inset-bottom));
@@ -443,6 +449,10 @@
     <button data-t="income" onclick="setAddType('income')">💰 Ingreso</button>
     <button data-t="investment" onclick="setAddType('investment')">📈 Inversión</button>
   </div>
+  <div class="fix-row" id="fix-row" onclick="toggleFixed()">
+    <div class="fl"><b>🔁 Movimiento fijo</b><small id="fix-sub">Solo este mes</small></div>
+    <div class="switch" id="fix-switch"></div>
+  </div>
   <div class="amount-in">
     <input id="in-amt" type="text" inputmode="decimal" placeholder="0" oninput="cleanAmt(this)" />
     <label>importe en €</label>
@@ -456,8 +466,9 @@
     <input id="in-name" placeholder="Ej. Compra Mercadona, Nómina, Compra de acciones…" />
   </div>
   <div class="field">
-    <label>Fecha</label>
+    <label id="date-label">Fecha</label>
     <input id="in-date" type="date" />
+    <small id="date-note" style="display:none;color:var(--invest);font-size:12px;font-weight:600;margin-top:7px;line-height:1.4"></small>
   </div>
   <div class="btn-row" id="add-btns">
     <button class="btn" onclick="saveTx()">Guardar</button>
@@ -520,11 +531,13 @@ let state={txs:[],cats:[],theme:'light'};
 let cursor=new Date(); cursor.setDate(1);
 let pickedCat=null, editingTxId=null, pickedColor=COLORS[0], editingCatId=null;
 let addType='expense', catType='expense';
+let editingRecurring=null, isFixed=false, fixedLocked=false;
 let activeCatFilter='all', activeDay='all', activeType='all';
 let charts={};
 
 const EUR=new Intl.NumberFormat('es-ES',{style:'currency',currency:'EUR',maximumFractionDigits:2});
 const fmt=n=>EUR.format(n||0);
+const pad=n=>String(n).padStart(2,'0');
 const fmt0=n=>new Intl.NumberFormat('es-ES',{style:'currency',currency:'EUR',maximumFractionDigits:0}).format(n||0);
 const MONTHS=['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
 const DOW=['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'];
@@ -538,6 +551,7 @@ function load(){
   migrate();
 }
 function migrate(){
+  if(!state.recurring)state.recurring=[];
   if(!state.cats)state.cats=[];
   // tag existing categories without type as expense
   state.cats.forEach(c=>{if(!c.type)c.type='expense';});
@@ -555,6 +569,49 @@ function catById(id){return state.cats.find(c=>c.id===id)||{name:'?',emoji:'❓'
 function catsOfType(tp){return state.cats.filter(c=>c.type===tp);}
 function txType(t){return t.type||'expense';}
 
+/* ===== RECURRENTES (movimientos fijos con versionado hacia adelante) ===== */
+function clampDay(y,m,day){return Math.min(Math.max(day||1,1),new Date(y,m+1,0).getDate());}
+function ruleVersionFor(rule,monthKey){
+  let v=null;(rule.versions||[]).forEach(ver=>{if(ver.from<=monthKey)v=ver;});return v;
+}
+function ruleActive(rule,monthKey){
+  if(rule.endFrom&&monthKey>=rule.endFrom)return null;
+  return ruleVersionFor(rule,monthKey);
+}
+function recurringTxsForMonth(y,m){
+  const monthKey=`${y}-${pad(m+1)}`;const out=[];
+  (state.recurring||[]).forEach(rule=>{
+    const v=ruleActive(rule,monthKey);
+    if(v){const day=clampDay(y,m,v.day);
+      out.push({id:`r:${rule.id}:${monthKey}`,ruleId:rule.id,recurring:true,
+        amount:v.amount,name:v.name,catId:v.catId,type:rule.type,
+        date:`${monthKey}-${pad(day)}`,createdAt:0});}
+  });
+  return out;
+}
+function effectiveTxsForMonth(y,m){
+  const real=state.txs.filter(t=>{const d=new Date(t.date+'T00:00');return d.getFullYear()===y&&d.getMonth()===m;});
+  return real.concat(recurringTxsForMonth(y,m));
+}
+function boundedMonths(){
+  const keys=new Set(state.txs.map(t=>t.date.slice(0,7)));
+  (state.recurring||[]).forEach(r=>{if(r.versions&&r.versions[0])keys.add(r.versions[0].from);});
+  const now=new Date();const nowKey=`${now.getFullYear()}-${pad(now.getMonth()+1)}`;keys.add(nowKey);
+  if(!keys.size)return[];
+  const sorted=[...keys].sort();
+  let[minY,minM]=sorted[0].split('-').map(Number);
+  let maxKey=sorted[sorted.length-1];if(maxKey<nowKey)maxKey=nowKey;
+  let[maxY,maxM]=maxKey.split('-').map(Number);
+  const months=[];let y=minY,m=minM;
+  while(y<maxY||(y===maxY&&m<=maxM)){months.push(`${y}-${pad(m)}`);m++;if(m>12){m=1;y++;}}
+  return months;
+}
+function allEffectiveTxs(){
+  let list=[...state.txs];
+  boundedMonths().forEach(key=>{const[Y,M]=key.split('-').map(Number);list=list.concat(recurringTxsForMonth(Y,M-1));});
+  return list;
+}
+
 /* ============================ NAVEGACIÓN ============================ */
 function go(v){
   document.querySelectorAll('.view').forEach(e=>e.classList.remove('active'));
@@ -569,14 +626,11 @@ function changeMonth(d){cursor.setMonth(cursor.getMonth()+d);renderAll();}
 
 /* ============================ MÉTRICAS ============================ */
 const sameMonth=(iso,ref)=>{const d=new Date(iso+'T00:00');return d.getMonth()===ref.getMonth()&&d.getFullYear()===ref.getFullYear();};
-function monthTxs(ref=cursor){return state.txs.filter(t=>sameMonth(t.date,ref));}
+function monthTxs(ref=cursor){return effectiveTxsForMonth(ref.getFullYear(),ref.getMonth());}
 function metricsForMonth(y,m){
   let income=0,expense=0,invest=0;
-  state.txs.forEach(t=>{const d=new Date(t.date+'T00:00');
-    if(d.getFullYear()===y&&d.getMonth()===m){
-      const tp=txType(t);
-      if(tp==='income')income+=t.amount; else if(tp==='investment')invest+=t.amount; else expense+=t.amount;
-    }});
+  effectiveTxsForMonth(y,m).forEach(t=>{const tp=txType(t);
+    if(tp==='income')income+=t.amount; else if(tp==='investment')invest+=t.amount; else expense+=t.amount;});
   return {income,expense,invest,savings:income-invest-expense};
 }
 
@@ -662,17 +716,19 @@ function renderBreakdown(exps,total){
 }
 function renderRecent(){
   const el=document.getElementById('recent-list');
-  const txs=[...state.txs].sort((a,b)=>b.date.localeCompare(a.date)||b.createdAt-a.createdAt).slice(0,5);
-  if(!txs.length){el.innerHTML=emptyBox('🧾','Aún no has registrado nada.');return;}
+  const txs=monthTxs().sort((a,b)=>b.date.localeCompare(a.date)||((b.createdAt||0)-(a.createdAt||0))).slice(0,6);
+  if(!txs.length){el.innerHTML=emptyBox('🧾','Aún no has registrado nada este mes.');return;}
   el.innerHTML=txs.map(txRow).join('');
 }
 function txRow(t){
   const c=catById(t.catId);const d=new Date(t.date+'T00:00');const tp=txType(t);
   const dstr=`${DOW[d.getDay()]} ${d.getDate()} ${MONTHS[d.getMonth()].slice(0,3)}`;
   const sign=tp==='income'?'+':'−';
+  const fix=t.recurring?'<span class="fixbadge">🔁</span>':'';
+  const fixsub=t.recurring?' · Fijo':'';
   return `<div class="tx" onclick="openEdit('${t.id}')">
     <div class="ic" style="background:${c.color}22;color:${c.color}">${c.emoji}</div>
-    <div class="info"><b>${esc(t.name||c.name)}</b><span>${c.name} · ${dstr}</span></div>
+    <div class="info"><b>${esc(t.name||c.name)}${fix}</b><span>${c.name} · ${dstr}${fixsub}</span></div>
     <div class="amt ${TYPE_CLS[tp]}">${sign}${fmt(t.amount)}</div></div>`;
 }
 function emptyBox(ic,txt){return `<div class="empty"><div class="e-ic">${ic}</div><p>${txt}</p></div>`;}
@@ -692,7 +748,7 @@ function buildFilters(){
   dp.innerHTML=`<div class="d ${activeDay==='all'?'on':''}" onclick="setDay('all')">Todos</div>`+
     [1,2,3,4,5,6,0].map(i=>`<div class="d ${activeDay==i?'on':''}" onclick="setDay(${i})">${DOW[i]}</div>`).join('');
   const ms=document.getElementById('f-month');
-  const months=[...new Set(state.txs.map(t=>t.date.slice(0,7)))].sort().reverse();
+  const months=boundedMonths().slice().reverse();
   const cur=ms.value;
   ms.innerHTML=`<option value="all">Todos los meses</option>`+months.map(m=>{
     const[y,mo]=m.split('-');return `<option value="${m}">${MONTHS[+mo-1]} ${y}</option>`;
@@ -706,7 +762,7 @@ function renderMovs(){
   const q=document.getElementById('f-search').value.toLowerCase().trim();
   const sort=document.getElementById('f-sort').value;
   const mfilter=document.getElementById('f-month').value;
-  let list=state.txs.filter(t=>{
+  let list=allEffectiveTxs().filter(t=>{
     if(activeType!=='all'&&txType(t)!==activeType)return false;
     if(activeCatFilter!=='all'&&t.catId!==activeCatFilter)return false;
     if(mfilter!=='all'&&t.date.slice(0,7)!==mfilter)return false;
@@ -746,26 +802,59 @@ function buildCatPick(){
       <span class="ce" style="background:${c.color}22;color:${c.color}">${c.emoji}</span><small>${c.name}</small></div>`).join('');
 }
 function pickCat(id){pickedCat=id;buildCatPick();}
+function lockTypeSeg(b){document.getElementById('add-type').classList.toggle('locked',b);}
+function toggleFixed(){if(fixedLocked)return;isFixed=!isFixed;updateFixUI();}
+function updateFixUI(){
+  document.getElementById('fix-switch').classList.toggle('on',isFixed);
+  document.getElementById('fix-sub').textContent=isFixed?'Se repetirá cada mes desde la fecha':'Solo este mes';
+  document.getElementById('date-label').textContent=isFixed?'Desde (se repite cada mes)':'Fecha';
+}
 function openAdd(){
-  editingTxId=null;
+  editingTxId=null;editingRecurring=null;isFixed=false;fixedLocked=false;
   document.getElementById('add-title').textContent='Nuevo movimiento';
   document.getElementById('in-amt').value='';
   document.getElementById('in-name').value='';
-  document.getElementById('in-date').value=new Date().toISOString().slice(0,10);
+  const dd=clampDay(cursor.getFullYear(),cursor.getMonth(),new Date().getDate());
+  document.getElementById('in-date').value=`${cursor.getFullYear()}-${pad(cursor.getMonth()+1)}-${pad(dd)}`;
   document.getElementById('add-btns').innerHTML='<button class="btn" onclick="saveTx()">Guardar</button>';
-  setAddType('expense');openSheet('add');
+  document.getElementById('fix-row').style.display='flex';
+  document.getElementById('date-note').style.display='none';
+  lockTypeSeg(false);setAddType('expense');updateFixUI();openSheet('add');
   setTimeout(()=>document.getElementById('in-amt').focus(),300);
 }
 function openEdit(id){
+  if(id.indexOf('r:')===0){
+    const parts=id.split(':'),ruleId=parts[1],monthKey=parts[2];
+    const rule=(state.recurring||[]).find(r=>r.id===ruleId);if(!rule)return;
+    const v=ruleActive(rule,monthKey);if(!v)return;
+    editingRecurring={ruleId,monthKey};editingTxId=null;
+    document.getElementById('add-title').textContent='Editar movimiento fijo';
+    document.getElementById('in-amt').value=String(v.amount).replace('.',',');
+    document.getElementById('in-name').value=v.name||'';
+    const y=+monthKey.slice(0,4),m=+monthKey.slice(5,7)-1,day=clampDay(y,m,v.day);
+    document.getElementById('in-date').value=`${monthKey}-${pad(day)}`;
+    document.getElementById('add-btns').innerHTML=
+      '<button class="btn danger" onclick="deleteTx()">Eliminar</button><button class="btn" onclick="saveTx()">Guardar</button>';
+    setAddType(rule.type);pickedCat=v.catId;buildCatPick();
+    lockTypeSeg(true);fixedLocked=true;isFixed=true;
+    document.getElementById('fix-row').style.display='flex';updateFixUI();
+    document.getElementById('date-label').textContent='Día del mes (desde aquí)';
+    const note=document.getElementById('date-note');note.style.display='block';
+    note.textContent=`🔁 Movimiento fijo. Los cambios se aplican desde ${MONTHS[m]} ${y} en adelante; los meses anteriores no cambian.`;
+    openSheet('add');return;
+  }
   const t=state.txs.find(x=>x.id===id);if(!t)return;
-  editingTxId=id;
+  editingTxId=id;editingRecurring=null;isFixed=false;fixedLocked=true;
   document.getElementById('add-title').textContent='Editar movimiento';
   document.getElementById('in-amt').value=String(t.amount).replace('.',',');
   document.getElementById('in-name').value=t.name||'';
   document.getElementById('in-date').value=t.date;
   document.getElementById('add-btns').innerHTML=
     '<button class="btn danger" onclick="deleteTx()">Eliminar</button><button class="btn" onclick="saveTx()">Guardar</button>';
-  setAddType(txType(t));pickedCat=t.catId;buildCatPick();openSheet('add');
+  document.getElementById('fix-row').style.display='none';
+  document.getElementById('date-note').style.display='none';
+  document.getElementById('date-label').textContent='Fecha';
+  lockTypeSeg(false);setAddType(txType(t));pickedCat=t.catId;buildCatPick();openSheet('add');
 }
 function cleanAmt(el){el.value=el.value.replace(/[^0-9.,]/g,'');}
 function saveTx(){
@@ -775,21 +864,52 @@ function saveTx(){
   const name=document.getElementById('in-name').value.trim();
   const date=document.getElementById('in-date').value||new Date().toISOString().slice(0,10);
   if(!pickedCat)pickedCat=(catsOfType(addType)[0]||{}).id;
-  if(editingTxId){
+  const d=new Date(date+'T00:00');
+  if(editingRecurring){
+    saveRecurringEdit(editingRecurring.ruleId,editingRecurring.monthKey,{amount:amt,name,catId:pickedCat,day:d.getDate()});
+    toast('Movimiento fijo actualizado ✓');
+  }else if(editingTxId){
     const t=state.txs.find(x=>x.id===editingTxId);
     Object.assign(t,{amount:amt,name,date,catId:pickedCat,type:addType});
     toast('Movimiento actualizado ✓');
+  }else if(isFixed){
+    createRecurring({type:addType,amount:amt,name,catId:pickedCat,day:d.getDate(),from:`${d.getFullYear()}-${pad(d.getMonth()+1)}`});
+    toast('Fijo creado ✓ se repetirá cada mes');
   }else{
     state.txs.push({id:'t'+Date.now()+Math.random().toString(36).slice(2,6),amount:amt,name,date,catId:pickedCat,type:addType,createdAt:Date.now()});
     toast({expense:'Gasto añadido ✓',income:'Ingreso añadido ✓',investment:'Inversión añadida ✓'}[addType]);
   }
   save();closeAdd();
-  const d=new Date(date+'T00:00');cursor=new Date(d.getFullYear(),d.getMonth(),1);
+  cursor=new Date(d.getFullYear(),d.getMonth(),1);
   renderAll();
 }
 function deleteTx(){
-  state.txs=state.txs.filter(x=>x.id!==editingTxId);
-  save();closeAdd();renderAll();toast('Movimiento eliminado');
+  if(editingRecurring){
+    deleteRecurring(editingRecurring.ruleId,editingRecurring.monthKey);
+    toast('Fijo eliminado desde este mes');
+  }else{
+    state.txs=state.txs.filter(x=>x.id!==editingTxId);
+    toast('Movimiento eliminado');
+  }
+  save();closeAdd();renderAll();
+}
+function createRecurring(d){
+  if(!state.recurring)state.recurring=[];
+  state.recurring.push({id:'rec'+Date.now()+Math.random().toString(36).slice(2,5),type:d.type,endFrom:null,
+    versions:[{from:d.from,amount:d.amount,name:d.name,catId:d.catId,day:d.day}]});
+}
+function saveRecurringEdit(ruleId,monthKey,data){
+  const rule=(state.recurring||[]).find(r=>r.id===ruleId);if(!rule)return;
+  const ex=rule.versions.find(v=>v.from===monthKey);
+  if(ex)Object.assign(ex,{amount:data.amount,name:data.name,catId:data.catId,day:data.day});
+  else{rule.versions.push({from:monthKey,amount:data.amount,name:data.name,catId:data.catId,day:data.day});
+    rule.versions.sort((a,b)=>a.from.localeCompare(b.from));}
+}
+function deleteRecurring(ruleId,monthKey){
+  const rule=(state.recurring||[]).find(r=>r.id===ruleId);if(!rule)return;
+  const firstFrom=rule.versions[0]?rule.versions[0].from:monthKey;
+  if(monthKey<=firstFrom){state.recurring=state.recurring.filter(r=>r.id!==ruleId);}
+  else{rule.endFrom=monthKey;rule.versions=rule.versions.filter(v=>v.from<monthKey);}
 }
 
 /* ============================ CATEGORÍAS ============================ */
@@ -995,19 +1115,24 @@ function loadDemo(){
     c4:['Cine','Concierto','Bar copas','Escape room'],c5:['Luz','Agua','Internet','IKEA'],
     c6:['Farmacia','Dentista','Gimnasio'],c7:['Netflix','Spotify','iCloud'],c8:['Regalo','Varios']};
   const today=new Date();const expCats=catsOfType('expense').slice(0,8);
+  // fijos: nomina (ingreso) y alquiler + gimnasio (gastos), desde hace 3 meses
+  const startKey=`${new Date(today.getFullYear(),today.getMonth()-2,1).getFullYear()}-${pad(new Date(today.getFullYear(),today.getMonth()-2,1).getMonth()+1)}`;
+  if(!state.recurring)state.recurring=[];
+  state.recurring.push({id:'rec-nomina',type:'income',endFrom:null,versions:[{from:startKey,amount:1900,name:'Nómina',catId:'i1',day:1}]});
+  state.recurring.push({id:'rec-alquiler',type:'expense',endFrom:null,versions:[{from:startKey,amount:700,name:'Alquiler',catId:'c5',day:1}]});
+  state.recurring.push({id:'rec-gym',type:'expense',endFrom:null,versions:[{from:startKey,amount:34.99,name:'Gimnasio',catId:'c6',day:5}]});
   for(let m=0;m<3;m++){
     const base=new Date(today.getFullYear(),today.getMonth()-m,1);
-    const ystr=base.getFullYear(),mstr=String(base.getMonth()+1).padStart(2,'0');
+    const ystr=base.getFullYear(),mstr=pad(base.getMonth()+1);
     const mk=(amt,name,catId,type,day)=>state.txs.push({id:'t'+Date.now()+Math.random().toString(36).slice(2,7),
-      amount:Math.round(amt*100)/100,name,date:`${ystr}-${mstr}-${String(day).padStart(2,'0')}`,catId,type,createdAt:Date.now()-Math.random()*1e9});
-    // ingresos
-    mk(1850+Math.random()*100,'Nómina','i1','income',1);
+      amount:Math.round(amt*100)/100,name,date:`${ystr}-${mstr}-${pad(day)}`,catId,type,createdAt:Date.now()-Math.random()*1e9});
+    // ingresos extra puntuales
     if(Math.random()>.5)mk(150+Math.random()*300,'Proyecto freelance','i2','income',12+Math.floor(Math.random()*10));
-    // inversiones
+    // inversiones puntuales
     mk(200+Math.random()*150,'Compra ETF','v2','investment',5);
     if(Math.random()>.4)mk(50+Math.random()*100,'Compra cripto','v3','investment',18);
-    // gastos
-    const n=16+Math.floor(Math.random()*8);
+    // gastos variables
+    const n=14+Math.floor(Math.random()*8);
     for(let i=0;i<n;i++){const c=expCats[Math.floor(Math.random()*expCats.length)];
       const pool=expNames[c.id]||['Gasto'];
       mk(3+Math.random()*70,pool[Math.floor(Math.random()*pool.length)],c.id,'expense',1+Math.floor(Math.random()*27));}
@@ -1016,7 +1141,7 @@ function loadDemo(){
 }
 function wipeData(){
   if(!confirm('¿Seguro? Se borrarán TODOS tus datos. Esta acción no se puede deshacer.'))return;
-  state={txs:[],cats:[...DEFAULT_CATS],theme:state.theme};save();renderAll();renderCatManage();toast('Datos borrados');
+  state={txs:[],cats:[...DEFAULT_CATS],recurring:[],theme:state.theme};save();renderAll();renderCatManage();toast('Datos borrados');
 }
 
 /* ============================ INIT ============================ */
