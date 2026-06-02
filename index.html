@@ -201,6 +201,10 @@
   .btn:active{transform:scale(.98)}
   .btn.ghost{background:var(--surface-2);color:var(--text);border:1px solid var(--border)}
   .btn.danger{background:var(--red-soft);color:var(--red)}
+  .btn.danger-solid{background:var(--red);color:#fff}
+  .btn:disabled{opacity:.45;cursor:not-allowed}
+  .wipe-check{display:flex;align-items:center;gap:9px;font-size:13.5px;font-weight:600;color:var(--text);margin-bottom:4px;cursor:pointer}
+  .wipe-check input{width:18px;height:18px;accent-color:var(--red);flex-shrink:0}
   .btn-row{display:flex;gap:10px}
   .btn-row .btn{margin-top:0}
   .cat-line{display:flex;align-items:center;gap:12px;padding:12px 4px}
@@ -413,7 +417,7 @@
           <div class="settings-row" onclick="loadDemo()">
             <div class="l"><span class="si">✨</span> Cargar datos de ejemplo</div><span class="chev">›</span>
           </div>
-          <div class="settings-row" onclick="wipeData()">
+          <div class="settings-row" onclick="openWipe()">
             <div class="l" style="color:var(--red)"><span class="si" style="background:var(--red-soft)">🗑️</span> Borrar todos los datos</div><span class="chev">›</span>
           </div>
         </div>
@@ -497,6 +501,23 @@
   <div class="btn-row">
     <button class="btn ghost" id="cat-del" onclick="deleteCat()" style="display:none">Eliminar</button>
     <button class="btn" onclick="saveCat()">Guardar</button>
+  </div>
+</div>
+
+<!-- ===== Borrado seguro ===== -->
+<div class="overlay" id="ov-wipe" onclick="closeWipe()"></div>
+<div class="sheet" id="sheet-wipe">
+  <div class="grab"></div>
+  <h3 style="color:var(--red)">⚠️ Borrar todos los datos</h3>
+  <p style="color:var(--muted);font-size:14px;line-height:1.55;margin-bottom:18px">Vas a eliminar <b>todos</b> tus movimientos, fijos y categorías personalizadas de este dispositivo. <b style="color:var(--red)">Esta acción no se puede deshacer.</b></p>
+  <div class="field">
+    <label>Para confirmar, escribe <b>BORRAR</b></label>
+    <input id="wipe-input" placeholder="BORRAR" oninput="checkWipeInput()" autocomplete="off" autocapitalize="characters" />
+  </div>
+  <label class="wipe-check"><input type="checkbox" id="wipe-backup" checked /> Descargar una copia de seguridad antes (recomendado)</label>
+  <div class="btn-row" style="margin-top:10px">
+    <button class="btn ghost" onclick="closeWipe()">Cancelar</button>
+    <button class="btn danger-solid" id="wipe-btn" onclick="confirmWipe()" disabled>Borrar todo</button>
   </div>
 </div>
 
@@ -1139,9 +1160,21 @@ function loadDemo(){
   }
   save();cursor=new Date();cursor.setDate(1);renderAll();renderCatManage();go('resumen');toast('Datos de ejemplo cargados ✨');
 }
-function wipeData(){
-  if(!confirm('¿Seguro? Se borrarán TODOS tus datos. Esta acción no se puede deshacer.'))return;
-  state={txs:[],cats:[...DEFAULT_CATS],recurring:[],theme:state.theme};save();renderAll();renderCatManage();toast('Datos borrados');
+function openWipe(){
+  document.getElementById('wipe-input').value='';
+  document.getElementById('wipe-backup').checked=true;
+  checkWipeInput();openSheet('wipe');
+}
+function closeWipe(){document.getElementById('ov-wipe').classList.remove('show');document.getElementById('sheet-wipe').classList.remove('show');}
+function checkWipeInput(){
+  const ok=document.getElementById('wipe-input').value.trim().toUpperCase()==='BORRAR';
+  document.getElementById('wipe-btn').disabled=!ok;
+}
+function confirmWipe(){
+  if(document.getElementById('wipe-input').value.trim().toUpperCase()!=='BORRAR'){toast('Escribe BORRAR para confirmar');return;}
+  if(document.getElementById('wipe-backup').checked)exportData();
+  state={txs:[],cats:[...DEFAULT_CATS],recurring:[],theme:state.theme};save();
+  closeWipe();renderAll();renderCatManage();toast('Todos los datos borrados');
 }
 
 /* ============================ INIT ============================ */
@@ -1155,7 +1188,7 @@ function init(){
     s.addEventListener('touchmove',e=>{const dy=e.touches[0].clientY-sy;
       if(dy>0&&s.scrollTop<=0)s.style.transform=`translateY(${dy}px)`;},{passive:true});
     s.addEventListener('touchend',e=>{const dy=e.changedTouches[0].clientY-sy;s.style.transform='';
-      if(dy>110){s.id==='sheet-add'?closeAdd():closeCatEdit();}},{passive:true});
+      if(dy>110){if(s.id==='sheet-add')closeAdd();else if(s.id==='sheet-cat')closeCatEdit();else if(s.id==='sheet-wipe')closeWipe();}},{passive:true});
   });
 }
 init();
