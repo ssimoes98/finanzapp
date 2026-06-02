@@ -106,6 +106,22 @@
   .tx .info span{font-size:12.5px;color:var(--muted);font-weight:500}
   .tx .amt{font-weight:700;font-size:15px;white-space:nowrap}
   .amt.inc{color:var(--green)} .amt.exp{color:var(--red)} .amt.inv{color:var(--invest)}
+  /* budget bar (de la nomina al ahorro) */
+  .budget .bhead{display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:12px}
+  .budget .bhead .inc{font-size:12.5px;color:var(--muted);font-weight:600}
+  .budget .bhead .inc b{color:var(--green);font-size:16px;display:block;margin-top:2px}
+  .budget .bhead .rem{text-align:right}
+  .budget .bhead .rem small{font-size:11px;color:var(--muted);font-weight:600;display:block}
+  .budget .bhead .rem b{font-size:19px;font-weight:800}
+  .budget .bhead .rem b.pos{color:var(--green)} .budget .bhead .rem b.neg{color:var(--red)}
+  .budget .bbar{height:18px;border-radius:9px;overflow:hidden;display:flex;background:var(--surface-2)}
+  .budget .bbar span{height:100%;transition:width .6s cubic-bezier(.4,0,.2,1)}
+  .budget .blegend{display:flex;gap:14px;margin-top:12px;flex-wrap:wrap}
+  .budget .blegend .li{display:flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:var(--muted)}
+  .budget .blegend .li .d{width:10px;height:10px;border-radius:3px;flex-shrink:0}
+  .budget .blegend .li b{color:var(--text)}
+  .budget .warn{margin-top:12px;background:var(--red-soft);color:var(--red);font-size:12.5px;font-weight:600;
+    padding:9px 12px;border-radius:11px;display:flex;align-items:center;gap:7px}
   .empty{text-align:center;padding:40px 20px;color:var(--muted)}
   .empty .e-ic{font-size:46px;margin-bottom:10px}
   .empty p{font-size:14px;line-height:1.5}
@@ -269,6 +285,7 @@
         <div class="flow exp"><div class="lbl"><span class="dot" style="background:var(--red)"></span>Gastos</div><div class="val" id="fl-exp">0 €</div></div>
         <div class="flow inv"><div class="lbl"><span class="dot" style="background:var(--invest)"></span>Inversión</div><div class="val" id="fl-inv">0 €</div></div>
       </div>
+      <div class="card budget" id="budget-card" style="display:none"></div>
       <div class="stats">
         <div class="stat"><div class="lbl">📅 Gasto medio/día</div><div class="val" id="st-avg">0 €</div></div>
         <div class="stat"><div class="lbl">🧾 Movimientos</div><div class="val" id="st-count">0</div></div>
@@ -600,8 +617,36 @@ function renderSummary(){
   const byDow={};exps.forEach(t=>{const d=new Date(t.date+'T00:00').getDay();byDow[d]=(byDow[d]||0)+t.amount;});
   const top=Object.entries(byDow).sort((a,b)=>b[1]-a[1])[0];
   document.getElementById('st-day').textContent=top?DOW[top[0]]:'—';
+  renderBudget(m);
   renderBreakdown(exps,m.expense);
   renderRecent();
+}
+function renderBudget(m){
+  const el=document.getElementById('budget-card');
+  if(m.income<=0&&m.expense<=0&&m.invest<=0){el.style.display='none';return;}
+  el.style.display='block';
+  const consumed=m.expense+m.invest;
+  const base=Math.max(m.income,consumed,1);
+  const eP=m.expense/base*100,iP=m.invest/base*100;
+  const rem=m.savings,rP=rem>0?rem/base*100:0;
+  const over=consumed>m.income;
+  const remCls=rem>=0?'pos':'neg';
+  let html=`<div class="bhead">
+      <div class="inc">De tus ingresos<b>${fmt(m.income)}</b></div>
+      <div class="rem"><small>${rem>=0?'Te queda (ahorro)':'Te has pasado'}</small><b class="${remCls}">${fmt(rem)}</b></div>
+    </div>
+    <div class="bbar">
+      <span style="width:${eP}%;background:var(--red)"></span>
+      <span style="width:${iP}%;background:var(--invest)"></span>
+      <span style="width:${rP}%;background:var(--green)"></span>
+    </div>
+    <div class="blegend">
+      <div class="li"><span class="d" style="background:var(--red)"></span>Gastos <b>${fmt(m.expense)}</b></div>
+      <div class="li"><span class="d" style="background:var(--invest)"></span>Inversión <b>${fmt(m.invest)}</b></div>
+      <div class="li"><span class="d" style="background:var(--green)"></span>Disponible <b>${fmt(Math.max(rem,0))}</b></div>
+    </div>`;
+  if(over)html+=`<div class="warn">⚠️ Has gastado e invertido ${fmt(consumed-m.income)} más de lo que ingresaste este mes.</div>`;
+  el.innerHTML=html;
 }
 function renderBreakdown(exps,total){
   const el=document.getElementById('breakdown');
