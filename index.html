@@ -274,6 +274,9 @@
   .emoji-row .ge{width:42px;height:42px;border-radius:12px;display:grid;place-items:center;font-size:20px;
     background:var(--surface-2);border:1.5px solid var(--border);cursor:pointer;transition:.12s}
   .emoji-row .ge.on{border-color:var(--primary);background:var(--primary-soft)}
+  .money-chip{display:flex;align-items:center;justify-content:center;gap:5px;background:var(--green-soft);color:var(--green);
+    font-size:13px;font-weight:600;padding:11px;border-radius:12px;margin-bottom:16px;cursor:pointer}
+  .money-chip b{font-weight:800}
   /* Budget edit rows */
   .be-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 2px}
   .be-row+.be-row{border-top:1px solid var(--border)}
@@ -590,6 +593,20 @@
     <button class="btn ghost" id="goal-del" onclick="deleteGoal()" style="display:none">Eliminar</button>
     <button class="btn" onclick="saveGoal()">Guardar</button>
   </div>
+</div>
+
+<!-- ===== Añadir ahorro a meta ===== -->
+<div class="overlay" id="ov-money" onclick="closeMoney()"></div>
+<div class="sheet" id="sheet-money">
+  <div class="grab"></div>
+  <h3>💰 Añadir ahorro a una meta</h3>
+  <div class="field"><label>Meta</label><select id="money-goal"></select></div>
+  <div class="amount-in">
+    <input id="money-amt" type="text" inputmode="decimal" placeholder="0" oninput="cleanAmt(this)" />
+    <label>cantidad en €</label>
+  </div>
+  <div class="money-chip" id="money-month" onclick="useMonthSaving()"></div>
+  <div class="btn-row"><button class="btn" onclick="saveMoney()">Añadir a la meta</button></div>
 </div>
 
 <!-- ===== Borrado seguro ===== -->
@@ -1254,7 +1271,7 @@ function renderGoals(){
       <div class="goal-top"><div class="gl">${g.emoji} <b>${esc(g.name)}</b></div><div class="gr">${fmt(g.saved)} / ${fmt(g.target)}</div></div>
       <div class="track"><div class="fill" style="width:${pct}%;background:${g.color||'#6366f1'}"></div></div>
       <div class="pct">${done?'¡Meta conseguida! 🎉':pct+'% · faltan '+fmt(g.target-g.saved)}</div></div>`;
-  }).join('');
+  }).join('')+`<button class="btn ghost" style="margin-top:12px" onclick="openMoney()">💰 Añadir ahorro a una meta</button>`;
 }
 function openGoal(id){
   editingGoalId=id||null;
@@ -1288,6 +1305,31 @@ function saveGoal(){
   save();closeGoal();renderSummary();toast('Meta guardada ✓');
 }
 function deleteGoal(){state.goals=state.goals.filter(x=>x.id!==editingGoalId);save();closeGoal();renderSummary();toast('Meta eliminada');}
+let moneyMonthSaving=0;
+function openMoney(goalId){
+  if(!state.goals.length){toast('Crea primero una meta');return;}
+  const sel=document.getElementById('money-goal');
+  sel.innerHTML=state.goals.map(g=>`<option value="${g.id}">${g.emoji} ${g.name} · ${fmt(g.saved)}/${fmt(g.target)}</option>`).join('');
+  if(goalId)sel.value=goalId;
+  const m=metricsForMonth(cursor.getFullYear(),cursor.getMonth());
+  moneyMonthSaving=Math.max(0,Math.round(m.savings*100)/100);
+  const chip=document.getElementById('money-month');
+  if(moneyMonthSaving>0){chip.style.display='flex';chip.innerHTML=`💡 Ahorro de ${MONTHS[cursor.getMonth()]}: <b>${fmt(moneyMonthSaving)}</b> · usar`;
+    document.getElementById('money-amt').value=String(moneyMonthSaving).replace('.',',');}
+  else{chip.style.display='none';document.getElementById('money-amt').value='';}
+  openSheet('money');
+}
+function closeMoney(){document.getElementById('ov-money').classList.remove('show');document.getElementById('sheet-money').classList.remove('show');}
+function useMonthSaving(){document.getElementById('money-amt').value=String(moneyMonthSaving).replace('.',',');}
+function saveMoney(){
+  const gid=document.getElementById('money-goal').value;
+  const amt=parseFloat(document.getElementById('money-amt').value.replace(',','.'));
+  if(!amt||amt<=0){toast('Introduce una cantidad válida');return;}
+  const g=state.goals.find(x=>x.id===gid);if(!g)return;
+  g.saved=Math.round((g.saved+amt)*100)/100;
+  save();closeMoney();renderSummary();
+  toast(g.saved>=g.target?'¡Meta conseguida! 🎉':`+${fmt(amt)} a ${g.name} ✓`);
+}
 
 /* ============================ CALENDARIO ============================ */
 let analisisTab='graficas';
@@ -1461,7 +1503,7 @@ function init(){
     s.addEventListener('touchmove',e=>{const dy=e.touches[0].clientY-sy;
       if(dy>0&&s.scrollTop<=0)s.style.transform=`translateY(${dy}px)`;},{passive:true});
     s.addEventListener('touchend',e=>{const dy=e.changedTouches[0].clientY-sy;s.style.transform='';
-      if(dy>110){if(s.id==='sheet-add')closeAdd();else if(s.id==='sheet-cat')closeCatEdit();else if(s.id==='sheet-wipe')closeWipe();else if(s.id==='sheet-goal')closeGoal();}},{passive:true});
+      if(dy>110){if(s.id==='sheet-add')closeAdd();else if(s.id==='sheet-cat')closeCatEdit();else if(s.id==='sheet-wipe')closeWipe();else if(s.id==='sheet-goal')closeGoal();else if(s.id==='sheet-money')closeMoney();}},{passive:true});
   });
 }
 init();
