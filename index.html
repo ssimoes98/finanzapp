@@ -1224,7 +1224,8 @@ function renderCompare(){
 function renderBudgets(){
   const el=document.getElementById('budgets-card');
   const budgeted=catsOfType('expense').filter(c=>state.budgets[c.id]>0);
-  const exps=monthTxs().filter(t=>txType(t)==='expense');
+  // los presupuestos solo cuentan gasto VARIABLE: se excluyen los movimientos fijos (prestamos, suscripciones...)
+  const exps=monthTxs().filter(t=>txType(t)==='expense'&&!t.recurring);
   const spentBy={};exps.forEach(t=>spentBy[t.catId]=(spentBy[t.catId]||0)+t.amount);
   let html='';
   if(state.savingsTarget>0){
@@ -1254,6 +1255,7 @@ function renderBudgetEdit(){
   const el=document.getElementById('budget-edit');
   let html=`<div class="be-row"><div class="l">🐷 Objetivo de ahorro mensual</div>
     <div class="be-in"><input type="text" inputmode="decimal" value="${state.savingsTarget||''}" placeholder="0" oninput="cleanAmt(this)" onchange="setSavingsTarget(this.value)"><span>€</span></div></div>
+    <p style="color:var(--muted);font-size:12px;margin:14px 2px 2px;line-height:1.5">ℹ️ Los presupuestos solo miden tu <b>gasto variable</b>. Los movimientos fijos (préstamos, suscripciones…) <b>no cuentan</b> aquí.</p>
     <div class="grp-h">Límite mensual por categoría</div>`;
   catsOfType('expense').forEach(c=>{
     html+=`<div class="be-row"><div class="l"><span class="ce" style="background:${c.color}22;color:${c.color}">${c.emoji}</span>${c.name}</div>
