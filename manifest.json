@@ -1,0 +1,17 @@
+{
+  "name": "FinanzApp · Tus finanzas",
+  "short_name": "FinanzApp",
+  "description": "Controla tus gastos, ingresos, inversiones y ahorro con presupuestos, metas y análisis.",
+  "lang": "es",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f4f5fb",
+  "theme_color": "#6366f1",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
